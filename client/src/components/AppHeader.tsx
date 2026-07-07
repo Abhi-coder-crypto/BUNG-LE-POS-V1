@@ -7,7 +7,8 @@ import {
   UtensilsCrossed,
   Calendar,
   FileText,
-  MoreVertical
+  MoreVertical,
+  ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,12 @@ export default function AppHeader({
       icon: MonitorPlay, 
       path: "/kitchen",
       color: "text-green-600 dark:text-green-400"
+    },
+    { 
+      label: "KOT", 
+      icon: ClipboardList, 
+      path: "/kot",
+      color: "text-orange-600 dark:text-orange-400"
     },
     { 
       label: "Menu", 

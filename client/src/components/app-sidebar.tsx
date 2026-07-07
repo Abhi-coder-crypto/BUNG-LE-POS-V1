@@ -7,6 +7,7 @@ import {
   FileText,
   Utensils,
   ChevronRight,
+  ClipboardList,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,6 +34,7 @@ const mainMenuItems = [
   { title: "Billing / POS", url: "/billing", icon: ShoppingCart },
   { title: "Tables", url: "/tables", icon: Utensils },
   { title: "Kitchen Display", url: "/kitchen", icon: ChefHat },
+  { title: "KOT", url: "/kot", icon: ClipboardList },
   { title: "Menu", url: "/menu", icon: FileText },
 ];
 

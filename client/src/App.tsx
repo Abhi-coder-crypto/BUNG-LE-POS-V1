@@ -63,6 +63,7 @@ import MarketingPage from "@/pages/marketing";
 import IntegrationsPage from "@/pages/integrations";
 import DatabasePage from "@/pages/database";
 import DigitalMenuOrdersPage from "@/pages/digital-menu-orders";
+import KOTPage from "@/pages/kot";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -144,6 +145,7 @@ function Router() {
       <Route path="/integrations">{() => <ProtectedRoute component={IntegrationsPage} />}</Route>
       <Route path="/database">{() => <ProtectedRoute component={DatabasePage} />}</Route>
       <Route path="/digital-menu-orders">{() => <ProtectedRoute component={DigitalMenuOrdersPage} />}</Route>
+      <Route path="/kot">{() => <ProtectedRoute component={KOTPage} />}</Route>
       <Route component={NotFound} />
     </Switch>
   );
