@@ -436,6 +436,16 @@ export class MongoStorage implements IStorage {
     return result ?? undefined;
   }
 
+  async updateOrderItem(id: string, data: Partial<Pick<OrderItem, 'quantity' | 'notes' | 'name'>>): Promise<OrderItem | undefined> {
+    await this.ensureConnection();
+    const result = await mongodb.getCollection<OrderItem>('orderItems').findOneAndUpdate(
+      { id } as any,
+      { $set: data },
+      { returnDocument: 'after' }
+    );
+    return result ?? undefined;
+  }
+
   async deleteOrderItem(id: string): Promise<boolean> {
     await this.ensureConnection();
     const result = await mongodb.getCollection<OrderItem>('orderItems').deleteOne({ id } as any);

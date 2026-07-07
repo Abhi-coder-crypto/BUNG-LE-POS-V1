@@ -84,6 +84,7 @@ export interface IStorage {
   getOrderItem(id: string): Promise<OrderItem | undefined>;
   createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
   updateOrderItemStatus(id: string, status: string): Promise<OrderItem | undefined>;
+  updateOrderItem(id: string, data: Partial<Pick<OrderItem, 'quantity' | 'notes' | 'name'>>): Promise<OrderItem | undefined>;
   deleteOrderItem(id: string): Promise<boolean>;
 
   getInventoryItems(): Promise<InventoryItem[]>;
@@ -589,6 +590,14 @@ export class MemStorage implements IStorage {
     const orderItem = this.orderItems.get(id);
     if (!orderItem) return undefined;
     const updated: OrderItem = { ...orderItem, status };
+    this.orderItems.set(id, updated);
+    return updated;
+  }
+
+  async updateOrderItem(id: string, data: Partial<Pick<OrderItem, 'quantity' | 'notes' | 'name'>>): Promise<OrderItem | undefined> {
+    const orderItem = this.orderItems.get(id);
+    if (!orderItem) return undefined;
+    const updated: OrderItem = { ...orderItem, ...data };
     this.orderItems.set(id, updated);
     return updated;
   }

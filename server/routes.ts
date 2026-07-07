@@ -962,6 +962,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/order-items/:id", requireAuth, async (req, res) => {
+    const st = getStorage(req);
+    const { quantity, notes, name } = req.body;
+    const data: Partial<{ quantity: number; notes: string | null; name: string }> = {};
+    if (quantity !== undefined) data.quantity = quantity;
+    if (notes !== undefined) data.notes = notes;
+    if (name !== undefined) data.name = name;
+    const item = await st.updateOrderItem(req.params.id, data);
+    if (!item) return res.status(404).json({ error: "Order item not found" });
+    const orderItems = await st.getOrderItems(item.orderId);
+    const total = orderItems.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
+    await st.updateOrderTotal(item.orderId, total.toFixed(2));
+    broadcastUpdate("order_item_updated", item);
+    res.json(item);
+  });
+
+  app.delete("/api/orders/:id", requireAuth, async (req, res) => {
+    const st = getStorage(req);
+    const order = await st.getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    const items = await st.getOrderItems(req.params.id);
+    for (const item of items) await st.deleteOrderItem(item.id);
+    if (order.tableId) {
+      await st.updateTableOrder(order.tableId, null);
+      await st.updateTableStatus(order.tableId, "free");
+      const updatedTable = await st.getTable(order.tableId);
+      if (updatedTable) broadcastUpdate("table_updated", updatedTable);
+    }
+    await st.deleteOrder(req.params.id);
+    broadcastUpdate("order_updated", { id: req.params.id, deleted: true });
+    res.json({ success: true });
+  });
+
   app.patch("/api/order-items/:id/status", requireAuth, async (req, res) => {
     const st = getStorage(req);
     const { status } = req.body;
