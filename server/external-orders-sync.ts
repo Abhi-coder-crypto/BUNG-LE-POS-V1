@@ -191,7 +191,9 @@ export class ExternalOrdersSyncService {
     }
 
     // ── 2. Normalise order type ───────────────────────────────────────
-    const rawType = (doc.orderType || doc.type || "delivery").toLowerCase();
+    // If no explicit orderType but a tableId/tableNumber is present → dine-in
+    const hasTableRef = !!(doc.tableId || doc.tableNumber || doc.table);
+    const rawType = (doc.orderType || doc.type || (hasTableRef ? "dine-in" : "delivery")).toLowerCase();
     const orderType: string =
       rawType.includes("dine") || rawType.includes("table") ? "dine-in"  :
       rawType.includes("pick") || rawType.includes("take")  ? "pickup"   :
@@ -202,9 +204,35 @@ export class ExternalOrdersSyncService {
     const isPaid  = (doc.paymentStatus || "").toLowerCase() === "paid";
     const posStatus = isPaid ? "billed" : "sent_to_kitchen";
 
+    // ── 3b. Resolve table ID for dine-in orders ──────────────────────
+    let resolvedTableId: string | null = null;
+    if (orderType === "dine-in") {
+      const rawTableRef = (doc.tableId || doc.tableNumber || doc.table || "").toString().trim();
+      if (rawTableRef) {
+        // Try exact match first (e.g. "T1")
+        let table = await this.storage.getTableByNumber(rawTableRef);
+
+        if (!table) {
+          // Normalise "Table1" / "table 01" / "TABLE1" → "T1" (strips leading zeros)
+          const numMatch = rawTableRef.match(/\d+/);
+          if (numMatch) {
+            const normalised = `T${parseInt(numMatch[0], 10)}`;
+            table = await this.storage.getTableByNumber(normalised);
+          }
+        }
+
+        if (table) {
+          resolvedTableId = table.id;
+          console.log(`🪑 [ExternalOrders] Matched table ref "${rawTableRef}" → ${table.tableNumber} (id: ${table.id})`);
+        } else {
+          console.warn(`⚠️  [ExternalOrders] Could not find table for ref "${rawTableRef}" — order will have no table linked`);
+        }
+      }
+    }
+
     // ── 4. Create POS order ──────────────────────────────────────────
     const posOrder = await this.storage.createOrder({
-      tableId:          null,
+      tableId:          resolvedTableId,
       orderType,
       status:           posStatus,
       total:            "0",
@@ -227,7 +255,25 @@ export class ExternalOrdersSyncService {
       const itemName = item.name || item.menuItemName || item.itemName || "Unknown Item";
       const qty      = Number(item.quantity || item.qty || 1);
       const price    = Number(item.price || item.unitPrice || item.rate || 0);
-      const isVeg    = item.isVeg ?? item.vegetarian ?? true;
+
+      // Derive isVeg from explicit flag OR from category string (e.g. "nonveg:rice" → false)
+      // Handles booleans, numbers (0/1), and string forms ("true"/"false"/"yes"/"no"/"0"/"1")
+      const parseBoolFlag = (v: unknown): boolean => {
+        if (typeof v === "boolean") return v;
+        if (typeof v === "number")  return v !== 0;
+        const s = String(v).toLowerCase().trim();
+        return s !== "false" && s !== "0" && s !== "no";
+      };
+      // Non-veg detection handles: "nonveg", "non-veg", "non veg", "NON_VEG", etc.
+      const isNonVegCategory = (s: string) => /non[-_\s]?veg/i.test(s);
+
+      let isVeg: boolean;
+      if (item.isVeg !== undefined)           isVeg = parseBoolFlag(item.isVeg);
+      else if (item.vegetarian !== undefined)  isVeg = parseBoolFlag(item.vegetarian);
+      else if (item.category)                  isVeg = !isNonVegCategory(String(item.category));
+      else if (item.type)                      isVeg = !isNonVegCategory(String(item.type));
+      else                                     isVeg = true; // safe default
+
       const notes    = item.notes || item.instructions || item.specialRequest || null;
 
       subtotal += qty * price;
