@@ -28,6 +28,7 @@ import { fetchMenuItemsFromMongoDB } from "./mongodbService";
 import { generateInvoicePDF } from "./utils/invoiceGenerator";
 import { generateKOTPDF } from "./utils/kotGenerator";
 import { DigitalMenuSyncService } from "./digital-menu-sync";
+import { ExternalOrdersSyncService } from "./external-orders-sync";
 
 const orderActionSchema = z.object({
   print: z.boolean().optional().default(false),
@@ -2105,6 +2106,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   digitalMenuSync.start(5000);
+
+  // ── External Orders Sync (Orders DB → orders collection) ──────────────────
+  const externalOrdersSync = new ExternalOrdersSyncService(storage);
+  externalOrdersSync.setBroadcastFunction(broadcastUpdate);
+
+  app.get("/api/external-orders/status", requireAuth, async (_req, res) => {
+    res.json(externalOrdersSync.getStatus());
+  });
+
+  app.post("/api/external-orders/sync-now", requireAuth, async (_req, res) => {
+    try {
+      const synced = await externalOrdersSync.sync();
+      res.json({ success: true, syncedOrders: synced });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "Sync failed" });
+    }
+  });
+
+  externalOrdersSync.start(5000);
 
   const httpServer = createServer(app);
 
