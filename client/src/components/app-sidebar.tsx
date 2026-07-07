@@ -3,18 +3,10 @@ import {
   ShoppingCart,
   Users,
   ChefHat,
-  BarChart3,
   Settings,
-  Package,
   FileText,
   Utensils,
-  Calendar,
   ChevronRight,
-  Gift,
-  Building2,
-  Truck,
-  Globe,
-  Smartphone,
 } from "lucide-react";
 import {
   Sidebar,
@@ -47,60 +39,17 @@ const mainMenuItems = [
 // Grouped secondary items in collapsible sections
 const menuGroups = [
   {
-    label: "Operations",
-    icon: Truck,
-    items: [
-      { title: "Delivery", url: "/delivery", icon: Truck },
-      { title: "Online Orders", url: "/online-orders", icon: Globe },
-      { title: "Digital Menu Orders", url: "/digital-menu-orders", icon: Smartphone },
-      { title: "Reservations", url: "/reservations", icon: Calendar },
-      { title: "Waiting List", url: "/waiting-list", icon: FileText },
-      { title: "Events", url: "/events", icon: Calendar },
-    ],
-  },
-  {
     label: "Customers",
     icon: Users,
     items: [
       { title: "Customers", url: "/customers", icon: Users },
-      { title: "Loyalty Program", url: "/loyalty", icon: Gift },
-      { title: "Gift Cards", url: "/gift-cards", icon: Gift },
-      { title: "Feedback", url: "/feedback", icon: FileText },
-    ],
-  },
-  {
-    label: "Inventory",
-    icon: Package,
-    items: [
-      { title: "Inventory", url: "/inventory", icon: Package },
-      { title: "Purchase Orders", url: "/purchase-orders", icon: ShoppingCart },
-      { title: "Suppliers", url: "/suppliers", icon: Building2 },
-      { title: "Wastage", url: "/wastage", icon: FileText },
-    ],
-  },
-  {
-    label: "Analytics",
-    icon: BarChart3,
-    items: [
-      { title: "Analytics", url: "/analytics", icon: BarChart3 },
-      { title: "Reports", url: "/reports", icon: FileText },
-      { title: "Sales Detailed", url: "/sales-detailed", icon: BarChart3 },
-      { title: "Item Performance", url: "/item-performance", icon: BarChart3 },
-      { title: "Kitchen Performance", url: "/kitchen-performance", icon: BarChart3 },
     ],
   },
   {
     label: "System",
     icon: Settings,
     items: [
-      { title: "Multi-Location", url: "/multi-location", icon: Building2 },
-      { title: "Integrations", url: "/integrations", icon: FileText },
-      { title: "Printer Config", url: "/printer-config", icon: FileText },
-      { title: "Email Templates", url: "/email-templates", icon: FileText },
-      { title: "Notifications", url: "/notifications", icon: FileText },
-      { title: "Audit Logs", url: "/audit-logs", icon: FileText },
-      { title: "Database", url: "/database", icon: FileText },
-      { title: "Backup", url: "/backup", icon: FileText },
+      { title: "POS Config", url: "/printer-config", icon: FileText },
     ],
   },
 ];
