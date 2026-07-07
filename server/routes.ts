@@ -2124,7 +2124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  externalOrdersSync.start(5000);
+  externalOrdersSync.start(1000);
 
   const httpServer = createServer(app);
 

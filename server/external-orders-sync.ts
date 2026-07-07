@@ -80,12 +80,17 @@ export class ExternalOrdersSyncService {
 
   private async connect(): Promise<void> {
     if (this.client) return;
-    const uri = process.env.MONGODB_URI;
-    if (!uri) throw new Error("MONGODB_URI is not set");
+    // Use the digital menu cluster URI if set separately; otherwise fall back to
+    // MONGODB_URI (works when both apps share the same Atlas cluster).
+    const uri = process.env.DIGITAL_MENU_MONGODB_URI || process.env.MONGODB_URI;
+    if (!uri) throw new Error("Neither DIGITAL_MENU_MONGODB_URI nor MONGODB_URI is set");
+    const usingKey = process.env.DIGITAL_MENU_MONGODB_URI
+      ? "DIGITAL_MENU_MONGODB_URI"
+      : "MONGODB_URI (fallback)";
     this.client = new MongoClient(uri);
     await this.client.connect();
     this.db = this.client.db(EXTERNAL_DB_NAME);
-    console.log(`✅ [ExternalOrders] Connected to "${EXTERNAL_DB_NAME}" database`);
+    console.log(`✅ [ExternalOrders] Connected to "${EXTERNAL_DB_NAME}" database (via ${usingKey})`);
   }
 
   private collection() {
