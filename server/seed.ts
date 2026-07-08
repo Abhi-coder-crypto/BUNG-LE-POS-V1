@@ -5,7 +5,7 @@ import * as path from 'path';
 const seedData = JSON.parse(fs.readFileSync('/tmp/items_with_images.json', 'utf-8'));
 
 async function seedDatabase() {
-  const client = new MongoClient(process.env.DATABASE_URL || 'mongodb://localhost:27017/pos_system');
+  const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017/pos_system');
   
   try {
     await client.connect();

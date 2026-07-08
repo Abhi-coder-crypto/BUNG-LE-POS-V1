@@ -210,7 +210,7 @@ const seedData = [
 ];
 
 async function seedDatabase() {
-  const mongoUrl = process.env.DATABASE_URL || 'mongodb://localhost:27017/pos_system';
+  const mongoUrl = process.env.MONGODB_URI || 'mongodb://localhost:27017/pos_system';
   const client = new MongoClient(mongoUrl);
   
   try {

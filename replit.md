@@ -212,14 +212,12 @@ Preferred communication style: Simple, everyday language.
 - Staff and attendance records
 - Financial transactions and reports
 
-**Schema Strategy**: Uses Drizzle-Zod integration for runtime validation and type safety across the stack.
+**Schema Strategy**: TypeScript interfaces with Zod validation across the stack (no ORM — direct MongoDB driver).
 
 ## External Dependencies
 
-### Database & ORM
-- **Neon Serverless PostgreSQL**: Cloud-hosted PostgreSQL database
-- **Drizzle ORM**: Type-safe ORM with schema migrations
-- **Drizzle Kit**: Schema management and migration tooling
+### Database
+- **MongoDB** (v6 Node.js driver): Primary database for all POS data. Configured via `MONGODB_URI` secret.
 
 ### UI Component Libraries
 - **Radix UI**: Comprehensive set of unstyled, accessible UI primitives
