@@ -55,11 +55,12 @@ class DynamicMongoDBManager {
     try {
       const client = new MongoClient(mongodbUri);
       await client.connect();
-      
-      const dbName = this.extractDatabaseName(mongodbUri);
-      const db = client.db(dbName);
-      
-      console.log(`Connected to MongoDB for restaurant ${restaurantId}: ${dbName}`);
+
+      // Always use "POS" so per-restaurant settings land in the same
+      // database as the rest of the POS data on the shared cluster.
+      const db = client.db('POS');
+
+      console.log(`Connected to MongoDB for restaurant ${restaurantId}: POS`);
       
       this.connections.set(restaurantId, {
         client,

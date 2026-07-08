@@ -17,27 +17,15 @@ class MongoDBService {
     try {
       this.client = new MongoClient(uri);
       await this.client.connect();
-      
-      const dbName = this.extractDatabaseName(uri);
-      this.db = this.client.db(dbName);
-      
-      console.log(`✅ Connected to MongoDB database: ${dbName}`);
+
+      // Always use "POS" as the database name so POS data is isolated
+      // from any other databases (e.g. "Orders") on the same cluster.
+      this.db = this.client.db('POS');
+
+      console.log(`✅ Connected to MongoDB database: POS`);
     } catch (error) {
       console.error('❌ MongoDB connection error:', error);
       throw error;
-    }
-  }
-
-  private extractDatabaseName(uri: string): string {
-    try {
-      const url = new URL(uri);
-      const pathname = url.pathname.substring(1);
-      if (pathname && pathname !== '') {
-        return pathname.split('?')[0];
-      }
-      return 'restaurant_pos';
-    } catch (error) {
-      return 'restaurant_pos';
     }
   }
 
