@@ -10,6 +10,13 @@ The application is designed as a single-page application (SPA) with no page relo
 
 Preferred communication style: Simple, everyday language.
 
+## Running on Replit
+
+- Workflow "Start application" runs `npm run dev` (Express + Vite dev server on port 5000).
+- Requires `MONGODB_URI` and `SESSION_SECRET` secrets (both already configured) — the app connects to MongoDB on startup and seeds default data if the database is empty; sessions won't initialize without `SESSION_SECRET`.
+- Demo login: `admin` / `admin123` (local/testing only — rotate or disable before any real/shared deployment).
+- Note: despite the "External Dependencies" section below mentioning Neon/Drizzle/PostgreSQL, the app was migrated to MongoDB (see "Complete MongoDB Migration" under Recent Changes) — those sections are stale leftovers from before the migration.
+
 ## System Architecture
 
 ### Frontend Architecture
