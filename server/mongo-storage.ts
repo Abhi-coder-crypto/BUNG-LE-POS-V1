@@ -39,6 +39,8 @@ import {
   type InsertInventoryUsage,
   type DeliveryPerson,
   type InsertDeliveryPerson,
+  type PrinterDevice,
+  type InsertPrinter,
 } from "@shared/schema";
 import { IStorage } from './storage';
 import { randomUUID } from 'crypto';
@@ -1324,6 +1326,61 @@ export class MongoStorage implements IStorage {
     await collection.updateOne({ id: orderId } as any, { $set: { deliveryPersonId } });
     const updated = await collection.findOne({ id: orderId } as any);
     return updated ?? undefined;
+  }
+
+  // ── Printer CRUD ──────────────────────────────────────────────────────────
+
+  async getPrinters(): Promise<PrinterDevice[]> {
+    await this.ensureConnection();
+    const docs = await mongodb.getCollection<PrinterDevice>('printers').find({} as any).toArray();
+    return docs.map(d => { const { _id, ...rest } = d as any; return rest as PrinterDevice; });
+  }
+
+  async getPrinter(id: string): Promise<PrinterDevice | undefined> {
+    await this.ensureConnection();
+    const doc = await mongodb.getCollection<PrinterDevice>('printers').findOne({ id } as any);
+    if (!doc) return undefined;
+    const { _id, ...rest } = doc as any;
+    return rest as PrinterDevice;
+  }
+
+  async createPrinter(printer: InsertPrinter): Promise<PrinterDevice> {
+    await this.ensureConnection();
+    const newPrinter: PrinterDevice = {
+      id: randomUUID(),
+      name: printer.name,
+      ip: printer.ip,
+      port: printer.port ?? 9100,
+      type: printer.type ?? "KOT",
+      autoPrint: printer.autoPrint ?? true,
+      createdAt: new Date(),
+    };
+    await mongodb.getCollection('printers').insertOne(newPrinter as any);
+    return newPrinter;
+  }
+
+  async updatePrinter(id: string, data: Partial<InsertPrinter>): Promise<PrinterDevice | undefined> {
+    await this.ensureConnection();
+    const collection = mongodb.getCollection<PrinterDevice>('printers');
+    const existing = await collection.findOne({ id } as any);
+    if (!existing) return undefined;
+    const update: any = {};
+    if (data.name !== undefined) update.name = data.name;
+    if (data.ip !== undefined) update.ip = data.ip;
+    if (data.port !== undefined) update.port = data.port;
+    if (data.type !== undefined) update.type = data.type;
+    if (data.autoPrint !== undefined) update.autoPrint = data.autoPrint;
+    await collection.updateOne({ id } as any, { $set: update });
+    const updated = await collection.findOne({ id } as any);
+    if (!updated) return undefined;
+    const { _id, ...rest } = updated as any;
+    return rest as PrinterDevice;
+  }
+
+  async deletePrinter(id: string): Promise<boolean> {
+    await this.ensureConnection();
+    const result = await mongodb.getCollection('printers').deleteOne({ id } as any);
+    return result.deletedCount > 0;
   }
 }
 

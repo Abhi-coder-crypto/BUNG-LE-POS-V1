@@ -40,8 +40,11 @@ import {
   type InsertInventoryUsage,
   type DeliveryPerson,
   type InsertDeliveryPerson,
+  type PrinterDevice,
+  type InsertPrinter,
 } from "@shared/schema";
 import { IStorage } from './storage';
+import { mongoStorage } from './mongo-storage';
 import { randomUUID } from 'crypto';
 
 export class SessionStorage implements IStorage {
@@ -1131,4 +1134,11 @@ export class SessionStorage implements IStorage {
     );
     return result ?? undefined;
   }
+
+  // Printers are global (not per-restaurant session) — delegate to shared mongoStorage
+  async getPrinters(): Promise<PrinterDevice[]> { return mongoStorage.getPrinters(); }
+  async getPrinter(id: string): Promise<PrinterDevice | undefined> { return mongoStorage.getPrinter(id); }
+  async createPrinter(p: InsertPrinter): Promise<PrinterDevice> { return mongoStorage.createPrinter(p); }
+  async updatePrinter(id: string, p: Partial<InsertPrinter>): Promise<PrinterDevice | undefined> { return mongoStorage.updatePrinter(id, p); }
+  async deletePrinter(id: string): Promise<boolean> { return mongoStorage.deletePrinter(id); }
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery, useQueries, useMutation } from "@tanstack/react-query";
 import AppHeader from "@/components/AppHeader";
 import { Badge } from "@/components/ui/badge";
@@ -14,9 +14,12 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Order, OrderItem, Table, Floor, MenuItem } from "@shared/schema";
+import type { Order, OrderItem, Table, Floor, MenuItem, PrinterDevice } from "@shared/schema";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+
+// localStorage key for tracking which orders have been auto-printed
+const PRINTED_KEY = "kot_auto_printed_ids";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface KOTTicket {
@@ -576,6 +579,67 @@ export default function KOTPage() {
   const { data: completedOrders = [] } = useQuery<Order[]>({ queryKey: ["/api/orders/completed"] });
   const { data: tables          = [] } = useQuery<Table[]>({ queryKey: ["/api/tables"] });
   const { data: floors          = [] } = useQuery<Floor[]>({ queryKey: ["/api/floors"] });
+  const { data: printers        = [] } = useQuery<PrinterDevice[]>({ queryKey: ["/api/printers"] });
+
+  // Auto-print: track which orders have already been printed
+  const printedRef = useRef<Set<string>>(new Set(
+    JSON.parse(localStorage.getItem(PRINTED_KEY) || "[]")
+  ));
+  const markPrinted = (orderId: string) => {
+    printedRef.current.add(orderId);
+    const arr = Array.from(printedRef.current).slice(-200); // keep last 200
+    localStorage.setItem(PRINTED_KEY, JSON.stringify(arr));
+  };
+
+  // Trigger browser print dialog as fallback
+  const browserPrintFallback = async (orderId: string) => {
+    const res = await fetch(`/api/orders/${orderId}/kot/pdf`);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;";
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(url);
+        }, 2000);
+      }, 300);
+    };
+  };
+
+  // Auto-print effect: fires when activeOrders changes
+  useEffect(() => {
+    if (printers.length === 0) return; // no printers configured — skip auto-print
+    const autoPrintKOTPrinters = printers.filter(p => p.type === "KOT" && p.autoPrint);
+    if (autoPrintKOTPrinters.length === 0) return;
+
+    const newOrders = activeOrders.filter(o => !printedRef.current.has(o.id));
+    if (newOrders.length === 0) return;
+
+    newOrders.forEach(async (order) => {
+      markPrinted(order.id); // mark immediately to avoid double-print
+      try {
+        const res = await fetch(`/api/printers/print-kot/${order.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ printerIds: autoPrintKOTPrinters.map(p => p.id) }),
+        });
+        const data = await res.json();
+        if (data.allFailed) {
+          // All ESC/POS printers failed → open browser print dialog
+          await browserPrintFallback(order.id);
+        }
+      } catch {
+        await browserPrintFallback(order.id);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrders]);
 
   // Filter to today's orders only
   const todayStart = useMemo(() => {
@@ -654,13 +718,34 @@ export default function KOTPage() {
   }), [allTickets]);
 
   const handlePrint = async (ticket: KOTTicket) => {
+    // Try ESC/POS KOT printers first
+    const kotPrinters = printers.filter(p => p.type === "KOT");
+    if (kotPrinters.length > 0) {
+      try {
+        const res = await fetch(`/api/printers/print-kot/${ticket.order.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ printerIds: kotPrinters.map(p => p.id) }),
+        });
+        const data = await res.json();
+        if (!data.allFailed) return; // at least one printer succeeded
+      } catch { /* fall through to browser print */ }
+    }
+    // Fallback: open browser print dialog via PDF
     const res = await fetch(`/api/orders/${ticket.order.id}/kot/pdf`);
     if (!res.ok) return;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${ticket.kotNumber}.pdf`; a.click();
-    URL.revokeObjectURL(url);
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;";
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow?.print();
+        setTimeout(() => { document.body.removeChild(iframe); URL.revokeObjectURL(url); }, 2000);
+      }, 300);
+    };
   };
 
   return (

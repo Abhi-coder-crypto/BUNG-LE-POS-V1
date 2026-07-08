@@ -2149,6 +2149,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Printer CRUD & print endpoints ───────────────────────────────────────
+
+  app.get("/api/printers", requireAuth, async (req, res) => {
+    try {
+      const printers = await mongoStorage.getPrinters();
+      res.json(printers);
+    } catch (e) {
+      res.status(500).json({ error: "Failed to fetch printers" });
+    }
+  });
+
+  app.post("/api/printers", requireAuth, async (req, res) => {
+    try {
+      const { insertPrinterSchema } = await import("@shared/schema");
+      const result = insertPrinterSchema.safeParse(req.body);
+      if (!result.success) return res.status(400).json({ error: result.error });
+      const printer = await mongoStorage.createPrinter(result.data);
+      res.json(printer);
+    } catch (e) {
+      res.status(500).json({ error: "Failed to create printer" });
+    }
+  });
+
+  app.patch("/api/printers/:id", requireAuth, async (req, res) => {
+    try {
+      const printer = await mongoStorage.updatePrinter(req.params.id, req.body);
+      if (!printer) return res.status(404).json({ error: "Printer not found" });
+      res.json(printer);
+    } catch (e) {
+      res.status(500).json({ error: "Failed to update printer" });
+    }
+  });
+
+  app.delete("/api/printers/:id", requireAuth, async (req, res) => {
+    try {
+      const ok = await mongoStorage.deletePrinter(req.params.id);
+      if (!ok) return res.status(404).json({ error: "Printer not found" });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: "Failed to delete printer" });
+    }
+  });
+
+  // Check a single printer's online status
+  app.get("/api/printers/:id/status", requireAuth, async (req, res) => {
+    try {
+      const { checkPrinterOnline } = await import("./utils/escpos");
+      const printer = await mongoStorage.getPrinter(req.params.id);
+      if (!printer) return res.status(404).json({ error: "Printer not found" });
+      const online = await checkPrinterOnline(printer.ip, printer.port);
+      res.json({ id: printer.id, online });
+    } catch (e) {
+      res.json({ id: req.params.id, online: false });
+    }
+  });
+
+  // Print a KOT to one or more printers by ID
+  // Returns per-printer results so the frontend knows which ones failed
+  app.post("/api/printers/print-kot/:orderId", requireAuth, async (req, res) => {
+    const st = getStorage(req);
+    try {
+      const { buildKOTEscPos, printToThermal } = await import("./utils/escpos");
+      const { printerIds } = req.body as { printerIds?: string[] };
+
+      const order = await st.getOrder(req.params.orderId);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const orderItems = await st.getOrderItems(req.params.orderId);
+      let tableNumber: string | undefined;
+      let floorName: string | undefined;
+      if (order.tableId) {
+        const tbl = await st.getTable(order.tableId);
+        tableNumber = tbl?.tableNumber;
+        if (tbl?.floorId) floorName = (await st.getFloor(tbl.floorId))?.name;
+      }
+
+      const allPrinters = await mongoStorage.getPrinters();
+      const targets = printerIds?.length
+        ? allPrinters.filter(p => printerIds.includes(p.id))
+        : allPrinters.filter(p => p.type === "KOT");
+
+      if (targets.length === 0) {
+        return res.json({ results: [], allFailed: true });
+      }
+
+      const kotNumber = `KOT-${order.id.substring(0, 8).toUpperCase()}`;
+      const escData = buildKOTEscPos({ order, items: orderItems, tableNumber, floorName, kotNumber });
+
+      const results = await Promise.all(
+        targets.map(async (p) => {
+          const result = await printToThermal(p.ip, p.port, escData);
+          return { id: p.id, name: p.name, ...result };
+        })
+      );
+
+      const allFailed = results.every(r => !r.success);
+      res.json({ results, allFailed });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Test print to a specific printer
+  app.post("/api/printers/:id/test", requireAuth, async (req, res) => {
+    try {
+      const { printToThermal, checkPrinterOnline } = await import("./utils/escpos");
+      const printer = await mongoStorage.getPrinter(req.params.id);
+      if (!printer) return res.status(404).json({ error: "Printer not found" });
+
+      const ESC = 0x1b, GS = 0x1d, LF = 0x0a;
+      const now = new Date().toLocaleString("en-IN");
+      const parts = [
+        Buffer.from([ESC, 0x40]),              // init
+        Buffer.from([ESC, 0x61, 0x01]),        // center
+        Buffer.from([ESC, 0x21, 0x30]),        // double size
+        Buffer.from("TEST PRINT\n", "utf8"),
+        Buffer.from([ESC, 0x21, 0x00]),        // normal
+        Buffer.from(`${printer.name}\n`, "utf8"),
+        Buffer.from(`IP: ${printer.ip}:${printer.port}\n`, "utf8"),
+        Buffer.from(`Type: ${printer.type}\n`, "utf8"),
+        Buffer.from(`Time: ${now}\n`, "utf8"),
+        Buffer.from("--------------------------------\n", "utf8"),
+        Buffer.from([ESC, 0x45, 0x01]),        // bold
+        Buffer.from("Printer is Online!\n", "utf8"),
+        Buffer.from([ESC, 0x45, 0x00]),
+        Buffer.from([LF, LF, LF, LF]),
+        Buffer.from([GS, 0x56, 0x42, 0x03]),   // cut
+      ];
+      const data = Buffer.concat(parts);
+      const result = await printToThermal(printer.ip, printer.port, data);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   externalOrdersSync.start(1000);
 
   const httpServer = createServer(app);

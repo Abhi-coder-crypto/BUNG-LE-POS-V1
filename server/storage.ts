@@ -37,6 +37,8 @@ import {
   type InsertInventoryUsage,
   type DeliveryPerson,
   type InsertDeliveryPerson,
+  type PrinterDevice,
+  type InsertPrinter,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -173,6 +175,12 @@ export interface IStorage {
   assignDeliveryPerson(orderId: string, deliveryPersonId: string | null): Promise<Order | undefined>;
   
   seedInventoryAndRecipes?(): Promise<{ inventoryCount: number; recipesCount: number; suppliersCount: number }>;
+
+  getPrinters(): Promise<PrinterDevice[]>;
+  getPrinter(id: string): Promise<PrinterDevice | undefined>;
+  createPrinter(printer: InsertPrinter): Promise<PrinterDevice>;
+  updatePrinter(id: string, printer: Partial<InsertPrinter>): Promise<PrinterDevice | undefined>;
+  deletePrinter(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -941,6 +949,15 @@ export class MemStorage implements IStorage {
     this.orders.set(orderId, updated);
     return updated;
   }
+
+  // Printer stubs — MemStorage is a dev fallback; printers use MongoStorage
+  async getPrinters(): Promise<PrinterDevice[]> { return []; }
+  async getPrinter(_id: string): Promise<PrinterDevice | undefined> { return undefined; }
+  async createPrinter(p: InsertPrinter): Promise<PrinterDevice> {
+    throw new Error("MemStorage does not support printers");
+  }
+  async updatePrinter(_id: string, _p: Partial<InsertPrinter>): Promise<PrinterDevice | undefined> { return undefined; }
+  async deletePrinter(_id: string): Promise<boolean> { return false; }
 }
 
 export const storage: IStorage = new MemStorage();

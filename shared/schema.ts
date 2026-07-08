@@ -447,6 +447,27 @@ export const categoryUnits: Record<string, string[]> = {
   "Other": ["kg", "g", "L", "ml", "pcs", "box"],
 };
 
+// Printer types
+export interface PrinterDevice {
+  id: string;
+  name: string;
+  ip: string;
+  port: number;
+  type: "KOT" | "Bill" | "Label";
+  autoPrint: boolean;
+  createdAt: Date;
+}
+
+export const insertPrinterSchema = z.object({
+  name: z.string().min(1),
+  ip: z.string().min(1),
+  port: z.number().default(9100),
+  type: z.enum(["KOT", "Bill", "Label"]).default("KOT"),
+  autoPrint: z.boolean().default(true),
+});
+
+export type InsertPrinter = z.infer<typeof insertPrinterSchema>;
+
 // DeliveryPerson types
 export interface DeliveryPerson {
   id: string;
