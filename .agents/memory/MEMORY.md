@@ -1,0 +1,1 @@
+- [Mongo poll-sync duplicate-on-restart](mongo-poll-sync-claim-pattern.md) — mark-synced-at-end sync loops duplicate work across restarts; claim before create, not after.

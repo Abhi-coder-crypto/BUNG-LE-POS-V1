@@ -3,6 +3,11 @@ import { type DigitalMenuOrder, type DigitalMenuCustomer } from '@shared/schema'
 import { type IStorage } from './storage';
 import { ObjectId } from 'mongodb';
 
+// If a claim (syncedToPOS set, no posOrderId yet) is older than this, assume
+// the process that claimed it crashed before finishing and allow it to be
+// re-claimed, so a crash mid-sync only ever delays an order, never drops it.
+const STALE_CLAIM_MS = 2 * 60 * 1000;
+
 export class DigitalMenuSyncService {
   private storage: IStorage;
   private syncInterval: NodeJS.Timeout | null = null;
@@ -57,7 +62,14 @@ export class DigitalMenuSyncService {
         for (const order of customerDoc.orders) {
           if (order.syncedToPOS === true) {
             const orderId = order._id?.toString() || `${customerDoc._id.toString()}_${order.orderDate}`;
-            this.processedOrderIds.add(orderId);
+            // Only treat orders with a posOrderId as fully finished. A doc with
+            // syncedToPOS=true but no posOrderId is just a claim (possibly left
+            // behind by a process that crashed before finishing) — adding it to
+            // processedOrderIds here would make the in-memory guard skip it
+            // forever, silently defeating the stale-claim reclaim in syncOrders().
+            if (order.posOrderId) {
+              this.processedOrderIds.add(orderId);
+            }
             this.orderStatusMap.set(orderId, order.status);
             this.orderPaymentStatusMap.set(orderId, order.paymentStatus || 'pending');
             syncedCount++;
@@ -97,8 +109,17 @@ export class DigitalMenuSyncService {
         if (!customerDoc.orders || !Array.isArray(customerDoc.orders)) continue;
         
         for (const digitalOrder of customerDoc.orders) {
-          // Skip if already synced
-          if (digitalOrder.syncedToPOS === true) continue;
+          // Skip if already synced — unless it's a stale claim (syncedToPOS set
+          // but posOrderId never got written, meaning the claiming process died
+          // mid-sync) old enough to be presumed abandoned and safe to reclaim.
+          // A missing syncClaimedAt (e.g. a claim-only record left behind by
+          // code that predates this claim mechanism) is treated as infinitely
+          // old so it doesn't get stuck skipped forever.
+          if (digitalOrder.syncedToPOS === true) {
+            const claimedAt = digitalOrder.syncClaimedAt ? new Date(digitalOrder.syncClaimedAt).getTime() : 0;
+            const isStaleClaim = !digitalOrder.posOrderId && !digitalOrder.linkWriteFailed && (Date.now() - claimedAt) > STALE_CLAIM_MS;
+            if (!isStaleClaim) continue;
+          }
           
           // Only sync pending or confirmed orders
           if (digitalOrder.status !== 'pending' && digitalOrder.status !== 'confirmed') continue;
@@ -108,11 +129,56 @@ export class DigitalMenuSyncService {
           if (this.processedOrderIds.has(orderId)) continue;
           
           try {
-            // CRITICAL: Add to processedOrderIds IMMEDIATELY to prevent duplicate processing in race conditions
-            this.processedOrderIds.add(orderId);
             this.orderStatusMap.set(orderId, digitalOrder.status);
             this.orderPaymentStatusMap.set(orderId, digitalOrder.paymentStatus || 'pending');
-            
+
+            // Atomically claim the order in the DB BEFORE creating anything in the
+            // POS. Without this, a server restart between order creation and this
+            // flag being written would cause the next boot to see the order as
+            // still "unsynced" and create a duplicate POS order/KOT for it.
+            //
+            // Uses arrayFilters keyed on the order's own `_id` so the match/update
+            // is pinned to this exact array element — a plain `'orders._id'` +
+            // `'orders.syncedToPOS'` filter can match across two different
+            // elements of the same array and claim the wrong one.
+            const staleClaimCutoff = new Date(Date.now() - STALE_CLAIM_MS);
+            const claimResult = await collection.updateOne(
+              { _id: customerDoc._id },
+              {
+                $set: {
+                  'orders.$[elem].syncedToPOS': true,
+                  'orders.$[elem].syncClaimedAt': new Date(),
+                },
+              },
+              {
+                arrayFilters: [
+                  {
+                    'elem._id': digitalOrder._id,
+                    $or: [
+                      { 'elem.syncedToPOS': { $ne: true } },
+                      {
+                        'elem.syncedToPOS': true,
+                        'elem.posOrderId': { $exists: false },
+                        'elem.linkWriteFailed': { $ne: true },
+                        $or: [
+                          { 'elem.syncClaimedAt': { $exists: false } },
+                          { 'elem.syncClaimedAt': { $lt: staleClaimCutoff } },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              }
+            );
+            if (claimResult.modifiedCount === 0) {
+              console.log(`⏭️  Order ${orderId} already claimed elsewhere, skipping`);
+              continue;
+            }
+
+            // Only guard in-memory once the DB claim is confirmed ours — guarding
+            // earlier could suppress a legitimate retry if the claim attempt failed.
+            this.processedOrderIds.add(orderId);
+
             // Add customer info to order for processing
             const orderWithCustomer = {
               ...digitalOrder,
@@ -122,38 +188,65 @@ export class DigitalMenuSyncService {
               customerPhone: customerDoc.customerPhone
             };
             
-            const posOrderId = await this.convertAndCreatePOSOrder(orderWithCustomer);
-            synced++;
-            console.log(`✅ Synced digital menu order ${orderId} for ${customerDoc.customerName}`);
-            
-            // Mark this specific order as synced in the nested array and save POS order ID
-            await collection.updateOne(
-              { 
-                _id: customerDoc._id,
-                'orders._id': digitalOrder._id 
-              },
-              { 
-                $set: { 
-                  'orders.$.syncedToPOS': true,
-                  'orders.$.syncedAt': new Date(),
-                  'orders.$.posOrderId': posOrderId
-                } 
+            // Track whether the POS order was actually created so the catch
+            // block knows whether releasing the claim is safe. Releasing after
+            // a real POS order was created would let stale-claim reclaim create
+            // a second, duplicate order for the same customer order later.
+            let createdPosOrderId: string | null = null;
+            try {
+              createdPosOrderId = await this.convertAndCreatePOSOrder(orderWithCustomer);
+              synced++;
+              console.log(`✅ Synced digital menu order ${orderId} for ${customerDoc.customerName}`);
+
+              // Save the resulting POS order ID now that creation succeeded
+              await collection.updateOne(
+                {
+                  _id: customerDoc._id,
+                  'orders._id': digitalOrder._id
+                },
+                {
+                  $set: {
+                    'orders.$.syncedAt': new Date(),
+                    'orders.$.posOrderId': createdPosOrderId
+                  }
+                }
+              );
+
+              if (this.broadcastFn) {
+                this.broadcastFn('digital_menu_order_synced', {
+                  orderId,
+                  customerName: customerDoc.customerName,
+                  status: digitalOrder.status
+                });
               }
-            );
-            
-            if (this.broadcastFn) {
-              this.broadcastFn('digital_menu_order_synced', { 
-                orderId, 
-                customerName: customerDoc.customerName,
-                status: digitalOrder.status 
-              });
+            } catch (error) {
+              console.error(`❌ Failed to sync order ${orderId}:`, error);
+              // Remove from processedOrderIds so it can be retried in next sync cycle
+              this.processedOrderIds.delete(orderId);
+              this.orderStatusMap.delete(orderId);
+              this.orderPaymentStatusMap.delete(orderId);
+
+              if (createdPosOrderId) {
+                // The POS order WAS created but persisting the link back failed.
+                // Do not release the claim — that would let the next sync create
+                // a duplicate. Leave it claimed and flag it for manual review.
+                console.error(`❌ POS order ${createdPosOrderId} was created for ${orderId} but linking it back failed — leaving claimed for manual reconciliation`);
+                await collection.updateOne(
+                  { _id: customerDoc._id, 'orders._id': digitalOrder._id },
+                  { $set: { 'orders.$.posOrderId': createdPosOrderId, 'orders.$.linkWriteFailed': true } }
+                ).catch(() => {});
+              } else {
+                // Creation itself never happened — safe to release the claim so
+                // a manual/next sync can retry without risk of duplication.
+                await collection.updateOne(
+                  { _id: customerDoc._id, 'orders._id': digitalOrder._id },
+                  { $set: { 'orders.$.syncedToPOS': false }, $unset: { 'orders.$.syncClaimedAt': '' } }
+                ).catch(() => {});
+              }
             }
-          } catch (error) {
-            console.error(`❌ Failed to sync order ${orderId}:`, error);
-            // Remove from processedOrderIds so it can be retried in next sync cycle
+          } catch (outerError) {
+            console.error(`❌ Unexpected error processing order ${orderId}:`, outerError);
             this.processedOrderIds.delete(orderId);
-            this.orderStatusMap.delete(orderId);
-            this.orderPaymentStatusMap.delete(orderId);
           }
         }
       }

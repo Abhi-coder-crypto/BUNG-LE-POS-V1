@@ -31,6 +31,11 @@ import type { IStorage } from "./storage";
 const EXTERNAL_DB_NAME = "Orders";
 const EXTERNAL_COLL    = "orders";
 
+// If a claim (syncedToPOS set, no posOrderId yet) is older than this, assume
+// the process that claimed it crashed before finishing and allow it to be
+// re-claimed, so a crash mid-sync only ever delays an order, never drops it.
+const STALE_CLAIM_MS = 2 * 60 * 1000;
+
 export class ExternalOrdersSyncService {
   private storage: IStorage;
   private client: MongoClient | null = null;
@@ -125,11 +130,18 @@ export class ExternalOrdersSyncService {
     return this.db.collection(EXTERNAL_COLL);
   }
 
-  /** Mark every already-synced order so we don't re-process on restart */
+  /**
+   * Mark already-synced orders so we don't re-process them on restart.
+   * Only orders with a `posOrderId` are truly finished — a doc with
+   * `syncedToPOS: true` but no `posOrderId` is just a claim (possibly from a
+   * process that crashed before finishing). Adding claim-only docs here would
+   * make the in-memory guard permanently skip them, silently defeating the
+   * stale-claim reclaim logic in `sync()`.
+   */
   private async loadAlreadySynced(): Promise<void> {
     try {
       const docs = await this.collection()
-        .find({ syncedToPOS: true }, { projection: { _id: 1 } })
+        .find({ syncedToPOS: true, posOrderId: { $exists: true } }, { projection: { _id: 1 } })
         .toArray();
       docs.forEach(d => this.processedIds.add(d._id.toString()));
       console.log(`📊 [ExternalOrders] Loaded ${docs.length} already-synced orders`);
@@ -151,9 +163,29 @@ export class ExternalOrdersSyncService {
       // Accept ALL non-synced orders except terminal cancellations/rejections.
       // The digital menu may update status to values like "preparing", "ready",
       // "accepted" etc. — don't block on those.
+      const staleClaimCutoff = new Date(Date.now() - STALE_CLAIM_MS);
+      // Claimed but never finished (posOrderId missing) and the claim is old
+      // enough that the claiming process is presumed dead — reclaim it. A
+      // missing syncClaimedAt (e.g. a claim-only record from before this claim
+      // mechanism existed) is treated as infinitely old rather than excluded,
+      // so it doesn't get stuck skipped forever. Excludes linkWriteFailed docs:
+      // those already have a real POS order, so reclaiming would duplicate it
+      // — they need manual review instead.
+      const staleClaimClause = {
+        syncedToPOS: true,
+        posOrderId: { $exists: false },
+        linkWriteFailed: { $ne: true },
+        $or: [
+          { syncClaimedAt: { $exists: false } },
+          { syncClaimedAt: { $lt: staleClaimCutoff } },
+        ],
+      };
       const docs = await coll.find({
-        syncedToPOS: { $ne: true },
-        status:      { $nin: ["cancelled", "rejected", "cancel", "reject"] },
+        $or: [
+          { syncedToPOS: { $ne: true } },
+          staleClaimClause,
+        ],
+        status: { $nin: ["cancelled", "rejected", "cancel", "reject"] },
       }).sort({ createdAt: 1 }).toArray();
 
       // Diagnostic: also count how many total unsynced docs exist at all
@@ -175,30 +207,82 @@ export class ExternalOrdersSyncService {
           continue;
         }
 
-        // Guard immediately to avoid race conditions
+        // Atomically claim the document in the DB BEFORE creating anything in
+        // the POS. This is the source of truth across process restarts: if the
+        // server restarts (deploy, workflow restart, crash) after a POS order
+        // was created but before this flag was persisted, the old design would
+        // find the doc still "unsynced" on the next boot and create a second,
+        // duplicate order/KOT for the same customer order. Claiming first means
+        // a restart can only ever delay a sync (retried automatically once the
+        // claim goes stale, see STALE_CLAIM_MS, or manually via
+        // /api/external-orders/sync-now), never duplicate one. The claim filter
+        // also matches stale reclaims (see query above) so a crash mid-sync
+        // doesn't permanently strand the order.
+        const claimResult = await coll.updateOne(
+          {
+            _id: doc._id,
+            $or: [
+              { syncedToPOS: { $ne: true } },
+              staleClaimClause,
+            ],
+          },
+          { $set: { syncedToPOS: true, syncClaimedAt: new Date() } }
+        );
+        if (claimResult.modifiedCount === 0) {
+          // Another process/tick already claimed it between our find() and now.
+          console.log(`⏭️  [ExternalOrders] ${id} already claimed elsewhere, skipping`);
+          continue;
+        }
+
+        // Only guard in-memory once the DB claim is confirmed ours — guarding
+        // earlier could suppress a legitimate retry if the claim attempt failed.
         this.processedIds.add(id);
+
         console.log(`⚙️  [ExternalOrders] Processing order ${id} (customer: ${doc.customerName}, table: ${doc.tableId}, floor: ${doc.floorId})`);
 
+        // Track whether the POS order was actually created so the catch block
+        // below knows whether it's safe to release the claim. Releasing after
+        // a real POS order was created would let the stale-claim reclaim logic
+        // create a second, duplicate order for the same customer order later.
+        let createdPosOrderId: string | null = null;
         try {
-          const posOrderId = await this.createPOSOrder(doc);
+          createdPosOrderId = await this.createPOSOrder(doc);
 
           await coll.updateOne(
             { _id: doc._id },
-            { $set: { syncedToPOS: true, syncedAt: new Date(), posOrderId } }
+            { $set: { syncedAt: new Date(), posOrderId: createdPosOrderId } }
           );
 
           synced++;
-          console.log(`✅ [ExternalOrders] Synced order ${id} → POS order ${posOrderId}`);
+          console.log(`✅ [ExternalOrders] Synced order ${id} → POS order ${createdPosOrderId}`);
 
           this.broadcastFn?.("external_order_synced", {
             externalOrderId: id,
-            posOrderId,
+            posOrderId: createdPosOrderId,
             customerName: doc.customerName,
             customerPhone: doc.customerPhone,
           });
         } catch (err) {
           this.processedIds.delete(id); // allow retry
-          console.error(`❌ [ExternalOrders] Failed to sync order ${id}:`, err);
+          if (createdPosOrderId) {
+            // The POS order WAS created but persisting the link back to this
+            // doc failed. Do not release the claim — that would cause the
+            // next sync to create a duplicate. Leave it claimed and flag it
+            // for manual reconciliation instead.
+            console.error(`❌ [ExternalOrders] POS order ${createdPosOrderId} was created for ${id} but linking it back failed — leaving claimed for manual reconciliation:`, err);
+            await coll.updateOne(
+              { _id: doc._id },
+              { $set: { posOrderId: createdPosOrderId, linkWriteFailed: true } }
+            ).catch(() => {});
+          } else {
+            // Creation itself never happened — safe to release the claim so a
+            // manual/next sync can retry without any risk of duplication.
+            await coll.updateOne(
+              { _id: doc._id },
+              { $set: { syncedToPOS: false }, $unset: { syncClaimedAt: "" } }
+            ).catch(() => {});
+            console.error(`❌ [ExternalOrders] Failed to sync order ${id}:`, err);
+          }
         }
       }
 
