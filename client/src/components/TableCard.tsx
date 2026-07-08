@@ -17,7 +17,7 @@ interface TableCardProps {
   onBilling?: (id: string) => void;
 }
 
-const statusConfig = {
+const statusConfig: Record<string, { borderColor: string; circleColor: string; circleBorder: string; label: string }> = {
   free: {
     borderColor: "border-black",
     circleColor: "bg-white",
@@ -30,29 +30,30 @@ const statusConfig = {
     circleBorder: "border-[#ff2400]",
     label: "Occupied",
   },
+  // Legacy statuses mapped to occupied for display
   preparing: {
     borderColor: "border-black",
-    circleColor: "bg-[#fff500]",
-    circleBorder: "border-[#fff500]",
-    label: "Preparing",
+    circleColor: "bg-[#ff2400]",
+    circleBorder: "border-[#ff2400]",
+    label: "Occupied",
   },
   ready: {
     borderColor: "border-black",
-    circleColor: "bg-[#3acd32]",
-    circleBorder: "border-[#3acd32]",
-    label: "Ready",
+    circleColor: "bg-[#ff2400]",
+    circleBorder: "border-[#ff2400]",
+    label: "Occupied",
   },
   reserved: {
     borderColor: "border-black",
-    circleColor: "bg-[#0075ff]",
-    circleBorder: "border-[#0075ff]",
-    label: "Reserved",
+    circleColor: "bg-[#ff2400]",
+    circleBorder: "border-[#ff2400]",
+    label: "Occupied",
   },
   served: {
     borderColor: "border-black",
-    circleColor: "bg-[#8000ff]",
-    circleBorder: "border-[#8000ff]",
-    label: "Served",
+    circleColor: "bg-[#ff2400]",
+    circleBorder: "border-[#ff2400]",
+    label: "Occupied",
   },
 };
 
@@ -72,7 +73,8 @@ export default function TableCard({
   const [elapsedTime, setElapsedTime] = useState(0);
   
   useEffect(() => {
-    if (!orderStartTime || (status !== "occupied" && status !== "preparing" && status !== "ready" && status !== "served")) {
+    const isOccupied = status !== "free";
+    if (!orderStartTime || !isOccupied) {
       if (tableTimerStore.has(id)) {
         tableTimerStore.delete(id);
       }
@@ -147,12 +149,7 @@ export default function TableCard({
           <Users className="h-3 w-3" />
           <span>{seats}</span>
         </div>
-        {status === "reserved" && (
-          <div className="absolute top-1 right-1 z-10 bg-[#0075ff] text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-md border-2 border-white">
-            R
-          </div>
-        )}
-        {(status === "occupied" || status === "preparing" || status === "ready" || status === "served") && orderStartTime && (
+        {status !== "free" && orderStartTime && (
           <div className="absolute top-1 right-1 z-10 flex items-center gap-1 text-xs font-mono font-semibold text-black">
             <Clock className="h-3 w-3" />
             <span>{formatTime(elapsedTime)}</span>
@@ -182,15 +179,6 @@ export default function TableCard({
         </div>
       </button>
       
-      {status === "ready" && onToggleServed && (
-        <button
-          onClick={handleServedClick}
-          className="mt-2 bg-[#8000ff] hover:bg-[#7000e6] text-white text-xs px-4 py-1.5 rounded-full font-medium transition-all hover:shadow-md"
-          data-testid={`toggle-served-${id}`}
-        >
-          Mark Served
-        </button>
-      )}
     </div>
   );
 }

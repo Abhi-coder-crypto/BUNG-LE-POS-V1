@@ -699,20 +699,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const order = await st.getOrder(req.params.id);
     if (order && order.tableId) {
-      const hasNew = orderItems.some((i) => i.status === "new");
-      const hasPreparing = orderItems.some((i) => i.status === "preparing");
-      const allReady = orderItems.every((i) => i.status === "ready" || i.status === "served");
-      const allServed = orderItems.every((i) => i.status === "served");
-
-      if (allServed) {
-        await st.updateTableStatus(order.tableId, "served");
-      } else if (allReady) {
-        await st.updateTableStatus(order.tableId, "ready");
-      } else if (hasPreparing) {
-        await st.updateTableStatus(order.tableId, "preparing");
-      } else if (hasNew) {
-        await st.updateTableStatus(order.tableId, "occupied");
-      }
+      // Table is always just "occupied" while it has an active order
+      await st.updateTableStatus(order.tableId, "occupied");
 
       const updatedTable = await st.getTable(order.tableId);
       if (updatedTable) {
@@ -1064,31 +1052,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const order = await st.getOrder(item.orderId);
     if (order && order.tableId) {
       const allItems = await st.getOrderItems(item.orderId);
-      const hasNew = allItems.some((i) => i.status === "new");
-      const hasPreparing = allItems.some((i) => i.status === "preparing");
-      const allReady = allItems.every((i) => i.status === "ready" || i.status === "served");
-      const allServed = allItems.every((i) => i.status === "served");
-
-      let newTableStatus = null;
-      if (allServed) {
-        newTableStatus = "served";
-        await st.updateTableStatus(order.tableId, "served");
-      } else if (allReady) {
-        newTableStatus = "ready";
-        await st.updateTableStatus(order.tableId, "ready");
-      } else if (hasPreparing) {
-        newTableStatus = "preparing";
-        await st.updateTableStatus(order.tableId, "preparing");
-      } else if (hasNew) {
-        newTableStatus = "occupied";
-        await st.updateTableStatus(order.tableId, "occupied");
-      }
-
-      if (newTableStatus) {
-        const updatedTable = await st.getTable(order.tableId);
-        if (updatedTable) {
-          broadcastUpdate("table_updated", updatedTable);
-        }
+      // Table is always just "occupied" while it has an active order
+      await st.updateTableStatus(order.tableId, "occupied");
+      const updatedTable = await st.getTable(order.tableId);
+      if (updatedTable) {
+        broadcastUpdate("table_updated", updatedTable);
       }
     }
 

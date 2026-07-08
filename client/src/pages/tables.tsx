@@ -91,26 +91,6 @@ export default function TablesPage() {
     });
   }, [tables, orders]);
 
-  const markServedMutation = useMutation({
-    mutationFn: async (tableId: string) => {
-      const table = tablesWithOrders.find((t) => t.id === tableId);
-      if (!table || !table.currentOrderId) return;
-
-      const orderItemsRes = await fetch(`/api/orders/${table.currentOrderId}/items`);
-      const orderItems = await orderItemsRes.json();
-
-      await Promise.all(
-        orderItems.map((item: any) =>
-          apiRequest("PATCH", `/api/order-items/${item.id}/status`, { status: "served" })
-        )
-      );
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tables"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders/active"] });
-    },
-  });
 
   const createFloorMutation = useMutation({
     mutationFn: async (data: { name: string; displayOrder: number }) => {
@@ -211,10 +191,6 @@ export default function TablesPage() {
     setSelectedTableForReservation(null);
   };
 
-  const handleToggleServed = async (tableId: string) => {
-    await markServedMutation.mutateAsync(tableId);
-  };
-
   const handleViewOrder = async (tableId: string) => {
     const table = tablesWithOrders.find((t) => t.id === tableId);
     if (!table) return;
@@ -278,11 +254,7 @@ export default function TablesPage() {
 
   const statusCounts = {
     free: tablesWithOrders.filter((t) => t.status === "free").length,
-    occupied: tablesWithOrders.filter((t) => t.status === "occupied").length,
-    preparing: tablesWithOrders.filter((t) => t.status === "preparing").length,
-    ready: tablesWithOrders.filter((t) => t.status === "ready").length,
-    reserved: tablesWithOrders.filter((t) => t.status === "reserved").length,
-    served: tablesWithOrders.filter((t) => t.status === "served").length,
+    occupied: tablesWithOrders.filter((t) => t.status !== "free").length,
   };
 
   const getStatusColor = (status: string) => {
@@ -325,30 +297,6 @@ export default function TablesPage() {
                 Occupied <Badge variant="secondary">{statusCounts.occupied}</Badge>
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-[#fff500]"></div>
-              <span className="text-sm">
-                Preparing <Badge variant="secondary">{statusCounts.preparing}</Badge>
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-[#3acd32]"></div>
-              <span className="text-sm">
-                Ready <Badge variant="secondary">{statusCounts.ready}</Badge>
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-[#0075ff]"></div>
-              <span className="text-sm">
-                Reserved <Badge variant="secondary">{statusCounts.reserved}</Badge>
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-[#8000ff]"></div>
-              <span className="text-sm">
-                Served <Badge variant="secondary">{statusCounts.served}</Badge>
-              </span>
-            </div>
           </div>
 
           <DropdownMenu>
@@ -373,34 +321,6 @@ export default function TablesPage() {
                   <span>Occupied</span>
                 </div>
                 <Badge variant="secondary">{statusCounts.occupied}</Badge>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-[#fff500]"></div>
-                  <span>Preparing</span>
-                </div>
-                <Badge variant="secondary">{statusCounts.preparing}</Badge>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-[#3acd32]"></div>
-                  <span>Ready</span>
-                </div>
-                <Badge variant="secondary">{statusCounts.ready}</Badge>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-[#0075ff]"></div>
-                  <span>Reserved</span>
-                </div>
-                <Badge variant="secondary">{statusCounts.reserved}</Badge>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-[#8000ff]"></div>
-                  <span>Served</span>
-                </div>
-                <Badge variant="secondary">{statusCounts.served}</Badge>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -466,7 +386,6 @@ export default function TablesPage() {
                       seats={table.seats}
                       orderStartTime={table.orderStartTime}
                       onClick={handleTableClick}
-                      onToggleServed={handleToggleServed}
                     />
                   ))}
                 </div>

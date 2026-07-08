@@ -577,9 +577,16 @@ export default function KOTPage() {
   const { data: tables          = [] } = useQuery<Table[]>({ queryKey: ["/api/tables"] });
   const { data: floors          = [] } = useQuery<Floor[]>({ queryKey: ["/api/floors"] });
 
+  // Filter to today's orders only
+  const todayStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
   const kitchenOrders = useMemo(() =>
-    activeOrders.filter(o => ["sent_to_kitchen", "preparing", "ready", "served"].includes(o.status)),
-    [activeOrders]
+    activeOrders.filter(o => new Date(o.createdAt) >= todayStart),
+    [activeOrders, todayStart]
   );
 
   const activeQueries = useQueries({
@@ -589,8 +596,13 @@ export default function KOTPage() {
     })),
   });
 
+  const todayCompletedOrders = useMemo(() =>
+    completedOrders.filter(o => new Date(o.createdAt) >= todayStart),
+    [completedOrders, todayStart]
+  );
+
   const completedQueries = useQueries({
-    queries: completedOrders.map(o => ({
+    queries: todayCompletedOrders.map(o => ({
       queryKey: ["/api/orders", o.id, "items"],
       queryFn: () => fetch(`/api/orders/${o.id}/items`).then(r => r.json()) as Promise<OrderItem[]>,
     })),
@@ -612,7 +624,7 @@ export default function KOTPage() {
 
   const allTickets = useMemo(() => {
     const active = buildTickets(kitchenOrders, activeQueries, 0);
-    const done   = buildTickets(completedOrders, completedQueries, kitchenOrders.length);
+    const done   = buildTickets(todayCompletedOrders, completedQueries, kitchenOrders.length);
     return [...active, ...done].sort(
       (a, b) => new Date(b.order.createdAt).getTime() - new Date(a.order.createdAt).getTime()
     );
