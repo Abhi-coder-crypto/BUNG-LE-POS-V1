@@ -373,6 +373,154 @@ export class ExternalOrdersSyncService {
     return fallback;
   }
 
+  /* ── backward sync helpers (POS → external DB) ─────────────────── */
+
+  /**
+   * Find the external DB document that was synced as a given POS order.
+   * Returns null silently if the POS order didn't come from the external DB.
+   */
+  private async findExternalDoc(posOrderId: string) {
+    try {
+      await this.connect();
+      return await this.collection().findOne({ posOrderId });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Delete the external-DB order that corresponds to `posOrderId`.
+   * Called when a KOT order is deleted from the POS.
+   */
+  async deleteExternalOrder(posOrderId: string): Promise<void> {
+    try {
+      await this.connect();
+      const result = await this.collection().deleteOne({ posOrderId });
+      if (result.deletedCount > 0) {
+        console.log(`🗑️  [ExternalOrders] Deleted external order for POS order ${posOrderId}`);
+      }
+    } catch (err) {
+      console.error(`⚠️  [ExternalOrders] Could not delete external order for POS order ${posOrderId}:`, err);
+    }
+  }
+
+  /**
+   * Update an item (quantity / notes) inside the external-DB order that
+   * corresponds to `posOrderId`. Matches by item name.
+   */
+  async syncItemUpdate(
+    posOrderId: string,
+    itemName: string,
+    updates: { quantity?: number; notes?: string | null },
+  ): Promise<void> {
+    try {
+      const doc = await this.findExternalDoc(posOrderId);
+      if (!doc) return; // not an external-DB order — nothing to do
+
+      const items: any[] = doc.items || [];
+      const idx = items.findIndex((i: any) =>
+        (i.name || i.menuItemName || i.itemName || "") === itemName
+      );
+      if (idx === -1) {
+        console.warn(`⚠️  [ExternalOrders] syncItemUpdate: item "${itemName}" not found in external order for POS ${posOrderId}`);
+        return;
+      }
+
+      const setFields: Record<string, any> = {};
+      if (updates.quantity !== undefined) setFields[`items.${idx}.quantity`] = updates.quantity;
+      if (updates.notes    !== undefined) setFields[`items.${idx}.notes`]    = updates.notes;
+
+      // Recalculate total from updated items array
+      const updatedItems = items.map((item: any, i: number) => ({
+        ...item,
+        ...(i === idx ? updates : {}),
+      }));
+      const newTotal = updatedItems.reduce(
+        (sum: number, item: any) =>
+          sum + Number(item.price || 0) * Number(item.quantity || 1),
+        0,
+      );
+      setFields["total"] = newTotal;
+
+      await this.collection().updateOne({ posOrderId }, { $set: setFields });
+      console.log(`✏️  [ExternalOrders] Updated item "${itemName}" in external order for POS ${posOrderId}`);
+    } catch (err) {
+      console.error(`⚠️  [ExternalOrders] Could not update item in external order for POS ${posOrderId}:`, err);
+    }
+  }
+
+  /**
+   * Remove an item from the external-DB order that corresponds to `posOrderId`.
+   * Matches by item name; removes the first match.
+   */
+  async syncItemDelete(posOrderId: string, itemName: string): Promise<void> {
+    try {
+      const doc = await this.findExternalDoc(posOrderId);
+      if (!doc) return;
+
+      const items: any[] = doc.items || [];
+      const idx = items.findIndex((i: any) =>
+        (i.name || i.menuItemName || i.itemName || "") === itemName
+      );
+      if (idx === -1) {
+        console.warn(`⚠️  [ExternalOrders] syncItemDelete: item "${itemName}" not found in external order for POS ${posOrderId}`);
+        return;
+      }
+
+      const updatedItems = items.filter((_: any, i: number) => i !== idx);
+      const newTotal = updatedItems.reduce(
+        (sum: number, item: any) =>
+          sum + Number(item.price || 0) * Number(item.quantity || 1),
+        0,
+      );
+
+      await this.collection().updateOne(
+        { posOrderId },
+        { $set: { items: updatedItems, total: newTotal } },
+      );
+      console.log(`🗑️  [ExternalOrders] Removed item "${itemName}" from external order for POS ${posOrderId}`);
+    } catch (err) {
+      console.error(`⚠️  [ExternalOrders] Could not remove item from external order for POS ${posOrderId}:`, err);
+    }
+  }
+
+  /**
+   * Add a new item to the external-DB order that corresponds to `posOrderId`.
+   * Called when an item is added to a KOT order from the POS.
+   */
+  async syncItemAdd(
+    posOrderId: string,
+    item: { name: string; price: number; quantity: number; notes?: string | null; isVeg?: boolean },
+  ): Promise<void> {
+    try {
+      const doc = await this.findExternalDoc(posOrderId);
+      if (!doc) return;
+
+      const newItem = {
+        name:     item.name,
+        price:    item.price,
+        quantity: item.quantity,
+        notes:    item.notes ?? null,
+        isVeg:    item.isVeg ?? true,
+      };
+
+      const existingItems: any[] = doc.items || [];
+      const newTotal =
+        existingItems.reduce(
+          (sum: number, i: any) => sum + Number(i.price || 0) * Number(i.quantity || 1),
+          0,
+        ) + item.price * item.quantity;
+
+      await this.collection().updateOne(
+        { posOrderId },
+        { $push: { items: newItem } as any, $set: { total: newTotal } },
+      );
+      console.log(`➕ [ExternalOrders] Added item "${item.name}" to external order for POS ${posOrderId}`);
+    } catch (err) {
+      console.error(`⚠️  [ExternalOrders] Could not add item to external order for POS ${posOrderId}:`, err);
+    }
+  }
+
   /** Convert an external order document into POS entities */
   private async createPOSOrder(doc: any): Promise<string> {
     // ── 1. Customer lookup / auto-register ───────────────────────────

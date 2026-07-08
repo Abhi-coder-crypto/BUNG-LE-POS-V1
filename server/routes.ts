@@ -68,6 +68,9 @@ function broadcastUpdate(type: string, data: any) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Instantiate early so all routes below can call backward-sync helpers
+  const externalOrdersSync = new ExternalOrdersSyncService(mongoStorage);
+
   app.get("/api/floors", requireAuth, async (req, res) => {
     const st = getStorage(req);
     const floors = await st.getFloors();
@@ -710,6 +713,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     console.log('[Server] Broadcasting order_item_added for orderId:', req.params.id);
     broadcastUpdate("order_item_added", { orderId: req.params.id, item });
+    // Backward-sync: add this item to the external DB order if applicable
+    externalOrdersSync.syncItemAdd(req.params.id, {
+      name:     item.name,
+      price:    parseFloat(item.price),
+      quantity: item.quantity,
+      notes:    item.notes ?? null,
+      isVeg:    item.isVeg,
+    }).catch(() => {});
     res.json(item);
   });
 
@@ -1021,6 +1032,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const total = orderItems.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
     await st.updateOrderTotal(item.orderId, total.toFixed(2));
     broadcastUpdate("order_item_updated", item);
+    // Backward-sync: reflect quantity/notes change in external DB if applicable
+    externalOrdersSync.syncItemUpdate(item.orderId, item.name, data).catch(() => {});
     res.json(item);
   });
 
@@ -1038,6 +1051,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     await st.deleteOrder(req.params.id);
     broadcastUpdate("order_updated", { id: req.params.id, deleted: true });
+    // Backward-sync: remove from external DB if this order came from there
+    externalOrdersSync.deleteExternalOrder(req.params.id).catch(() => {});
     res.json({ success: true });
   });
 
@@ -1089,6 +1104,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await st.updateOrderTotal(item.orderId, total.toFixed(2));
 
     broadcastUpdate("order_item_deleted", { id: req.params.id, orderId: item.orderId });
+    // Backward-sync: remove this item from the external DB order if applicable
+    externalOrdersSync.syncItemDelete(item.orderId, item.name).catch(() => {});
     res.json({ success: true });
   });
 
@@ -2133,7 +2150,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   digitalMenuSync.start(5000);
 
   // ── External Orders Sync (Orders DB → orders collection) ──────────────────
-  const externalOrdersSync = new ExternalOrdersSyncService(mongoStorage);
   externalOrdersSync.setBroadcastFunction(broadcastUpdate);
 
   app.get("/api/external-orders/status", requireAuth, async (_req, res) => {
