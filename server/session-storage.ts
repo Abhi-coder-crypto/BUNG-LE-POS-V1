@@ -1,5 +1,6 @@
 import { dynamicMongoDB } from './dynamic-mongodb';
-import { Collection, Document } from 'mongodb';
+import { Collection, Document, ObjectId } from 'mongodb';
+import { mongodb } from './mongodb';
 import {
   type User,
   type InsertUser,
@@ -878,53 +879,92 @@ export class SessionStorage implements IStorage {
     return result.deletedCount > 0;
   }
 
+  // ── Customer helpers ────────────────────────────────────────────────────
+  // Customers live in `customersdb.customers` on the shared cluster.
+  // External schema: contactNumber (= phone), visitCount, lastVisitDate.
+
+  private customersCol() {
+    return mongodb.getCustomersCollection<any>('customers');
+  }
+
+  private docToCustomer(doc: any): Customer {
+    return {
+      id:        doc._id.toString(),
+      name:      doc.name ?? '',
+      phone:     doc.contactNumber ?? doc.phone ?? '',
+      email:     doc.email   ?? null,
+      address:   doc.address ?? null,
+      createdAt: doc.createdAt ?? new Date(),
+    };
+  }
+
   async getCustomers(): Promise<Customer[]> {
     await this.ensureConnection();
-    const customers = await this.getCollection<Customer>('customers').find().toArray();
-    return customers;
+    const docs = await this.customersCol().find({}).sort({ createdAt: -1 }).toArray();
+    return docs.map(d => this.docToCustomer(d));
   }
 
   async getCustomer(id: string): Promise<Customer | undefined> {
     await this.ensureConnection();
-    const customer = await this.getCollection<Customer>('customers').findOne({ id } as any);
-    return customer ?? undefined;
+    try {
+      const doc = await this.customersCol().findOne({ _id: new ObjectId(id) });
+      return doc ? this.docToCustomer(doc) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async getCustomerByPhone(phone: string): Promise<Customer | undefined> {
     await this.ensureConnection();
-    const customer = await this.getCollection<Customer>('customers').findOne({ phone } as any);
-    return customer ?? undefined;
+    const doc = await this.customersCol().findOne({ contactNumber: phone });
+    return doc ? this.docToCustomer(doc) : undefined;
   }
 
   async createCustomer(insertCustomer: InsertCustomer): Promise<Customer> {
     await this.ensureConnection();
-    const id = randomUUID();
-    const customer: Customer = {
-      id,
-      name: insertCustomer.name,
-      phone: insertCustomer.phone,
-      email: insertCustomer.email ?? null,
-      address: insertCustomer.address ?? null,
-      createdAt: new Date(),
+    const now = new Date();
+    const doc = {
+      name:          insertCustomer.name,
+      contactNumber: insertCustomer.phone,
+      email:         insertCustomer.email   ?? null,
+      address:       insertCustomer.address ?? null,
+      visitCount:    1,
+      lastVisitDate: now,
+      createdAt:     now,
+      updatedAt:     now,
     };
-    await this.getCollection<Customer>('customers').insertOne(customer as any);
-    return customer;
+    const result = await this.customersCol().insertOne(doc);
+    return this.docToCustomer({ _id: result.insertedId, ...doc });
   }
 
   async updateCustomer(id: string, customerData: Partial<InsertCustomer>): Promise<Customer | undefined> {
     await this.ensureConnection();
-    const result = await this.getCollection<Customer>('customers').findOneAndUpdate(
-      { id } as any,
-      { $set: customerData },
-      { returnDocument: 'after' }
-    );
-    return result ?? undefined;
+    try {
+      const update: any = { updatedAt: new Date() };
+      if (customerData.name    !== undefined) update.name          = customerData.name;
+      if (customerData.phone   !== undefined) update.contactNumber = customerData.phone;
+      if (customerData.email   !== undefined) update.email         = customerData.email;
+      if (customerData.address !== undefined) update.address       = customerData.address;
+
+      const result = await this.customersCol().findOneAndUpdate(
+        { _id: new ObjectId(id) },
+        { $set: update },
+        { returnDocument: 'after' }
+      );
+      return result ? this.docToCustomer(result) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async deleteCustomer(id: string): Promise<boolean> {
     await this.ensureConnection();
-    const result = await this.getCollection<Customer>('customers').deleteOne({ id } as any);
-    return result.deletedCount > 0;
+    try {
+      const result = await this.customersCol().deleteOne({ _id: new ObjectId(id) });
+      return result.deletedCount > 0;
+    } catch {
+      return false;
+    }
   }
 
   async getFeedbacks(): Promise<Feedback[]> {
