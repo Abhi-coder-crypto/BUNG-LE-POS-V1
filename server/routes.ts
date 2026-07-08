@@ -640,7 +640,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         orderItems,
         tableNumber: tableInfo?.tableNumber || undefined,
         floorName: tableInfo?.floorId ? (await st.getFloor(tableInfo.floorId))?.name || undefined : undefined,
-        restaurantName: "Restaurant POS"
+        restaurantName: "Restaurant POS",
+        isUpdated: (order.kotCount ?? 0) > 1,
       });
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -763,9 +764,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
-    console.log('[Server] Broadcasting order_updated for KOT, orderId:', order.id, 'status:', order.status);
-    broadcastUpdate("order_updated", order);
-    res.json({ order, shouldPrint: result.data.print });
+    // Track how many times KOT has been sent — used to show "UPDATED" badge
+    const updatedOrder = await st.incrementKotCount(req.params.id) ?? order;
+    console.log('[Server] Broadcasting order_updated for KOT, orderId:', updatedOrder.id, 'status:', updatedOrder.status, 'kotCount:', updatedOrder.kotCount);
+    broadcastUpdate("order_updated", updatedOrder);
+    res.json({ order: updatedOrder, shouldPrint: result.data.print });
   });
 
   app.post("/api/orders/:id/save", requireAuth, async (req, res) => {
@@ -2251,7 +2254,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const kotNumber = `KOT-${order.id.substring(0, 8).toUpperCase()}`;
-      const escData = buildKOTEscPos({ order, items: orderItems, tableNumber, floorName, kotNumber });
+      const escData = buildKOTEscPos({ order, items: orderItems, tableNumber, floorName, kotNumber, isUpdated: (order.kotCount ?? 0) > 1 });
 
       const results = await Promise.all(
         targets.map(async (p) => {

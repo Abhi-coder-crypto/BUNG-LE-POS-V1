@@ -66,6 +66,7 @@ function KOTViewModal({
   const st = getStatus(ticket.order, ticket.items);
   const totalQty = ticket.items.reduce((s, i) => s + i.quantity, 0);
   const totalAmt = ticket.items.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
+  const isUpdated = (ticket.order.kotCount ?? 0) > 1;
 
   const typeLabel =
     ticket.order.orderType === "dine-in"  ? "Dine-In"  :
@@ -73,7 +74,7 @@ function KOTViewModal({
 
   /* Rows: [label, value, valueClass?] */
   const metaRows: [string, React.ReactNode][] = [
-    ["KOT No",     <span className="font-bold">{ticket.kotNumber}</span>],
+    ["KOT No",     <span className="font-bold flex items-center gap-1.5">{ticket.kotNumber}{isUpdated && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-300 leading-none">UPDATED</span>}</span>],
     ["Order Date", format(createdAt, "dd/MM/yyyy, hh:mm a")],
     ["Type",       typeLabel],
     ...(ticket.order.orderType === "dine-in" ? [
@@ -115,6 +116,13 @@ function KOTViewModal({
             </p>
             <p className="text-xs text-gray-400 mt-0.5 tracking-wide">Kitchen Order Ticket</p>
           </div>
+
+          {/* UPDATED banner */}
+          {isUpdated && (
+            <div className="flex items-center justify-center gap-2 py-1.5 rounded-lg bg-orange-100 border border-orange-300">
+              <span className="text-sm font-extrabold tracking-widest text-orange-700 uppercase">★ Updated KOT ★</span>
+            </div>
+          )}
 
           {/* ── Meta table ── */}
           <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden" style={{ borderCollapse: "collapse" }}>
@@ -444,6 +452,7 @@ function KOTGridCard({ ticket, onView, onEdit, onDelete, onPrint }: {
   const st = getStatus(ticket.order, ticket.items);
   const createdAt = new Date(ticket.order.createdAt);
   const totalQty = ticket.items.reduce((s, i) => s + i.quantity, 0);
+  const isUpdated = (ticket.order.kotCount ?? 0) > 1;
 
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col overflow-hidden hover:shadow-md transition-shadow">
@@ -452,6 +461,11 @@ function KOTGridCard({ ticket, onView, onEdit, onDelete, onPrint }: {
         <button onClick={onView} className="flex items-center gap-1.5 hover:text-orange-600 transition-colors">
           <ClipboardList className="h-3.5 w-3.5 text-orange-500" />
           <span className="text-xs font-bold text-orange-600">{ticket.kotNumber}</span>
+          {isUpdated && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-300 leading-none">
+              UPDATED
+            </span>
+          )}
         </button>
         <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1", st.bg, st.text)}>
           <span className={cn("h-1.5 w-1.5 rounded-full", st.dot)} />
@@ -514,13 +528,19 @@ function KOTListRow({ ticket, onView, onEdit, onDelete, onPrint }: {
   const st = getStatus(ticket.order, ticket.items);
   const createdAt = new Date(ticket.order.createdAt);
   const totalQty = ticket.items.reduce((s, i) => s + i.quantity, 0);
+  const isUpdated = (ticket.order.kotCount ?? 0) > 1;
 
   return (
     <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3 flex items-center gap-4 hover:shadow-sm transition-shadow">
       {/* KOT number */}
-      <button onClick={onView} className="flex items-center gap-1.5 w-28 flex-shrink-0 hover:text-orange-600 transition-colors">
+      <button onClick={onView} className="flex items-center gap-1.5 w-36 flex-shrink-0 hover:text-orange-600 transition-colors">
         <ClipboardList className="h-4 w-4 text-orange-500" />
         <span className="text-sm font-bold text-orange-600">{ticket.kotNumber}</span>
+        {isUpdated && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-300 leading-none">
+            UPDATED
+          </span>
+        )}
       </button>
 
       {/* Status */}

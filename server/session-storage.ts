@@ -319,6 +319,7 @@ export class SessionStorage implements IStorage {
       completedAt: null,
       billedAt: null,
       paidAt: null,
+      kotCount: 0,
     };
     await this.getCollection<Order>('orders').insertOne(order as any);
     return order;
@@ -329,6 +330,16 @@ export class SessionStorage implements IStorage {
     const result = await this.getCollection<Order>('orders').findOneAndUpdate(
       { id } as any,
       { $set: { status } },
+      { returnDocument: 'after' }
+    );
+    return result ?? undefined;
+  }
+
+  async incrementKotCount(id: string): Promise<Order | undefined> {
+    await this.ensureConnection();
+    const result = await this.getCollection<Order>('orders').findOneAndUpdate(
+      { id } as any,
+      { $inc: { kotCount: 1 } },
       { returnDocument: 'after' }
     );
     return result ?? undefined;

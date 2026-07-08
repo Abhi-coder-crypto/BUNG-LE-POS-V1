@@ -331,6 +331,7 @@ export class MongoStorage implements IStorage {
       completedAt: null,
       billedAt: null,
       paidAt: null,
+      kotCount: 0,
     };
     await mongodb.getCollection<Order>('orders').insertOne(order as any);
     return order;
@@ -341,6 +342,16 @@ export class MongoStorage implements IStorage {
     const result = await mongodb.getCollection<Order>('orders').findOneAndUpdate(
       { id } as any,
       { $set: { status } },
+      { returnDocument: 'after' }
+    );
+    return result ?? undefined;
+  }
+
+  async incrementKotCount(id: string): Promise<Order | undefined> {
+    await this.ensureConnection();
+    const result = await mongodb.getCollection<Order>('orders').findOneAndUpdate(
+      { id } as any,
+      { $inc: { kotCount: 1 } },
       { returnDocument: 'after' }
     );
     return result ?? undefined;

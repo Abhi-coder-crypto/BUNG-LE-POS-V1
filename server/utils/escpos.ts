@@ -26,8 +26,9 @@ export function buildKOTEscPos(opts: {
   floorName?: string;
   kotNumber: string;
   restaurantName?: string;
+  isUpdated?: boolean;
 }): Buffer {
-  const { order, items, tableNumber, floorName, kotNumber, restaurantName = "Restaurant POS" } = opts;
+  const { order, items, tableNumber, floorName, kotNumber, restaurantName = "Restaurant POS", isUpdated = false } = opts;
   const now = new Date(order.createdAt);
   const dateStr = now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
@@ -48,6 +49,17 @@ export function buildKOTEscPos(opts: {
   // Normal size
   parts.push(cmd(ESC, 0x21, 0x00));
   parts.push(text("Kitchen Order Ticket\n"));
+
+  // UPDATED banner — shown when KOT is re-sent
+  if (isUpdated) {
+    parts.push(text(sep + "\n"));
+    parts.push(cmd(ESC, 0x21, 0x10)); // double width
+    parts.push(cmd(ESC, 0x45, 0x01)); // bold on
+    parts.push(text("  *** UPDATED KOT ***\n"));
+    parts.push(cmd(ESC, 0x45, 0x00)); // bold off
+    parts.push(cmd(ESC, 0x21, 0x00)); // normal size
+  }
+
   parts.push(text(sep + "\n"));
 
   // Left align for details

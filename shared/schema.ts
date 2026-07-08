@@ -96,6 +96,7 @@ export interface Order {
   completedAt: Date | null;
   billedAt: Date | null;
   paidAt: Date | null;
+  kotCount: number;
 }
 
 export const insertOrderSchema = z.object({

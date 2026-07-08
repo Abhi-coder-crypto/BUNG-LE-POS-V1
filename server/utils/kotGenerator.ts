@@ -9,6 +9,7 @@ interface KOTData {
   floorName?: string;
   kotNumber?: string;
   restaurantName?: string;
+  isUpdated?: boolean;
 }
 
 /* ── colour palette (exactly matches the modal) ─────────────────────────── */
@@ -45,6 +46,7 @@ export function generateKOTPDF(data: KOTData): Buffer {
     tableNumber, floorName,
     kotNumber = `KOT-${order.id.substring(0, 8).toUpperCase()}`,
     restaurantName = "Restaurant POS",
+    isUpdated = false,
   } = data;
 
   /* ── Page setup ─────────────────────────────────────────────── */
@@ -101,6 +103,18 @@ export function generateKOTPDF(data: KOTData): Buffer {
   y += 5.5;
   txt("Kitchen Order Ticket", PW / 2, y, 8, "normal", C.labelText, "center");
   y += 5;
+
+  /* ── UPDATED banner (shown when KOT is re-sent) ──────────────── */
+  if (isUpdated) {
+    const bannerH = 7;
+    const bannerBg:   [number, number, number] = [255, 237, 213]; // orange-100
+    const bannerText: [number, number, number] = [194,  65,  12]; // orange-700
+    const bannerBorder: [number, number, number] = [234, 88, 12]; // orange-600
+    rect(margin, y, inner, bannerH, bannerBg, bannerBorder, 0.4);
+    txt("★  UPDATED KOT  ★", PW / 2, y + bannerH * 0.67, 8, "bold", bannerText, "center");
+    y += bannerH + 3;
+  }
+
   // divider line matching the UI
   doc.setDrawColor(...C.border);
   doc.setLineWidth(0.3);
